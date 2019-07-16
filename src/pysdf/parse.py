@@ -28,13 +28,13 @@ supported_sdf_versions = [1.4, 1.5, 1.6]
 
 catkin_ws_path_exists = os.path.exists(catkin_ws_path)
 
-if not catkin_ws_path_exists:
-  print ('----------------------------------------------------------')
-  print ('Path (%s) does not exist.' % catkin_ws_path)
-  print ('Please either set/change %s, or change ' % mesh_path_env_name)
-  print ('the catkin_ws_path variable inside pysdf/parse.py')
-  print ('----------------------------------------------------------')
-  sys.exit(1)
+#if not catkin_ws_path_exists:
+  #print ('----------------------------------------------------------')
+  #print ('Path (%s) does not exist.' % catkin_ws_path)
+  #print ('Please either set/change %s, or change ' % mesh_path_env_name)
+  #print ('the catkin_ws_path variable inside pysdf/parse.py')
+  #print ('----------------------------------------------------------')
+  #sys.exit(1)
 
 def sanitize_xml_input_name(text):
   ### removes whitespaces before and after the tag text
@@ -123,6 +123,9 @@ def get_node(node, tagname, default = None):
   else:
     return default
 
+def get_simple_tag_pose(node):
+  pose = get_tag(node, 'pose', '0 0 0  0 0 0')
+  return pose
 
 def get_tag_pose(node):
   pose = get_tag(node, 'pose', '0 0 0  0 0 0')
@@ -135,14 +138,20 @@ def indent(string, spaces):
 
 def model_from_include(parent, include_node):
     submodel_uri = get_tag(include_node, 'uri')
-    submodel_uri = submodel_uri.replace('model://', '')
-    submodel_path = find_model_in_gazebo_dir(submodel_uri)
+    # check if submodel_uri has model on it or file
+    if submodel_uri[:5] == 'model':
+        submodel_uri = submodel_uri.replace('model://', '')
+        submodel_path = find_model_in_gazebo_dir(submodel_uri)
+    elif submodel_uri[:4] == 'file':
+        submodel_uri = submodel_uri.replace('file://', '')
+        submodel_path = find_model_in_gazebo_dir(submodel_uri)
     if not submodel_path:
       print('Failed to find included model (URI: %s)' % submodel_uri)
       return
     submodel_name = get_tag(include_node, 'name')
+    simple_pose = get_simple_tag_pose(include_node)
     submodel_pose = get_tag_pose(include_node)
-    return Model(parent, name=submodel_name, pose=submodel_pose, file=submodel_path)
+    return Model(parent, name=submodel_name, pose=submodel_pose, file=submodel_path, simple_pose=simple_pose)
 
 
 def homogeneous_times_vector(homogeneous, vector):
@@ -204,8 +213,9 @@ class World(object):
       for include_node in node.findall('include'):
         included_model = model_from_include(None, include_node)
         if not included_model:
-          print('Failed to include model, see previous errors. Aborting.')
-          sys.exit(1)
+          #print('Failed to include model, see previous errors. Aborting.')
+          #sys.exit(1)
+          continue
         self.models.append(included_model)
       # TODO lights
     self.models += [Model(tree=model_node, version=self.version) for model_node in node.findall('model')]
@@ -281,6 +291,8 @@ class Model(SpatialEntity):
     self.links = []
     self.joints = []
     self.root_link = None
+    self.filename = kwargs['file']
+    self.simple_pose = kwargs['simple_pose']
     if 'tree' in kwargs:
       self.from_tree(kwargs['tree'], **kwargs)
     elif 'file' in kwargs:
@@ -315,7 +327,11 @@ class Model(SpatialEntity):
     if not os.path.exists(filename):
       print('Failed to open Model because %s does not exist' % filename)
       return
-    tree = ET.parse(filename)
+    try:
+      tree = ET.parse(filename)
+    except:
+      print('Failed to parse xml : %s , skipping...'% filename)
+      return
     root = tree.getroot()
     if root.tag != 'sdf':
       print('Not a SDF file. Aborting.')
@@ -334,7 +350,6 @@ class Model(SpatialEntity):
 
     # External pose offset (from <include>)
     self.pose = numpy.dot(kwargs.get('pose', identity_matrix()), self.pose)
-
 
   def from_tree(self, node, **kwargs):
     if node == None:
@@ -700,7 +715,7 @@ class Axis(object):
     self.use_parent_model_frame = bool(get_tag(node, 'use_parent_model_frame'))
     limitnode = get_node(node, 'limit')
     if limitnode == None:
-      print('limit Tag missing from joint. Aborting.')
+      #print('limit Tag missing from joint.')
       return
     self.lower_limit = float(get_tag(limitnode, 'lower', 0))
     self.upper_limit = float(get_tag(limitnode, 'upper', 0))
