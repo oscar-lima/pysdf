@@ -1,4 +1,4 @@
-from __future__ import print_function
+#!/usr/bin/env python3
 
 import itertools
 import os
@@ -7,8 +7,7 @@ import xml.etree.ElementTree as ET
 from xml.etree.ElementTree import ParseError
 import xml.dom.minidom
 import glob
-
-from tf.transformations import *
+import numpy
 
 from naming import *
 from conversions import *
@@ -127,11 +126,6 @@ def get_simple_tag_pose(node):
   pose = get_tag(node, 'pose', '0 0 0  0 0 0')
   return pose
 
-def get_tag_pose(node):
-  pose = get_tag(node, 'pose', '0 0 0  0 0 0')
-  return pose_string2homogeneous(pose)
-
-
 def indent(string, spaces):
   return string.replace('\n', '\n' + ' ' * spaces).strip()
 
@@ -150,8 +144,7 @@ def model_from_include(parent, include_node):
       return
     submodel_name = get_tag(include_node, 'name')
     simple_pose = get_simple_tag_pose(include_node)
-    submodel_pose = get_tag_pose(include_node)
-    return Model(parent, name=submodel_name, pose=submodel_pose, file=submodel_path, simple_pose=simple_pose)
+    return Model(parent, name=submodel_name, pose=None, file=submodel_path, simple_pose=simple_pose)
 
 
 def homogeneous_times_vector(homogeneous, vector):
@@ -262,8 +255,8 @@ class World(object):
 class SpatialEntity(object):
   def __init__(self, **kwargs):
     self.name = ''
-    self.pose = identity_matrix()
-    self.pose_world = identity_matrix()
+    self.pose = None
+    self.pose_world = None
 
 
   def __repr__(self):
@@ -278,8 +271,7 @@ class SpatialEntity(object):
     if node == None:
       return
     self.name = node.attrib['name']
-    self.pose = get_tag_pose(node)
-
+    self.pose = None
 
 
 class Model(SpatialEntity):
@@ -301,7 +293,6 @@ class Model(SpatialEntity):
     if not self.parent_model:
       self.root_link = self.find_root_link()
       self.build_tree()
-      self.calculate_absolute_pose()
 
 
   def __repr__(self):
@@ -349,7 +340,7 @@ class Model(SpatialEntity):
       self.name = kwargs_name
 
     # External pose offset (from <include>)
-    self.pose = numpy.dot(kwargs.get('pose', identity_matrix()), self.pose)
+    self.pose = None
 
   def from_tree(self, node, **kwargs):
     if node == None:
@@ -432,18 +423,6 @@ class Model(SpatialEntity):
       joint.tree_child_link.tree_parent_joint = joint
     for submodel in self.submodels:
       submodel.build_tree()
-
-
-  def calculate_absolute_pose(self, worldMVparent = identity_matrix()):
-    worldMVmodel = concatenate_matrices(worldMVparent, self.pose)
-    self.pose_world = worldMVmodel
-    for submodel in self.submodels:
-      submodel.calculate_absolute_pose(worldMVmodel)
-    for link in self.links:
-      link.pose_world = concatenate_matrices(worldMVmodel, link.pose)
-    for joint in self.joints:
-      joint.pose_world = concatenate_matrices(joint.tree_child_link.pose_world, joint.pose)
-
 
   def find_root_link(self):
     if not self.links:
@@ -744,7 +723,7 @@ class Axis(object):
 
 class Inertial(object):
   def __init__(self, **kwargs):
-    self.pose = identity_matrix()
+    self.pose = None
     self.mass = 0
     self.inertia = Inertia()
     if 'tree' in kwargs:
@@ -767,7 +746,7 @@ class Inertial(object):
     if node.tag != 'inertial':
       print('Invalid node of type %s instead of inertial. Aborting.' % node.tag)
       return
-    self.pose = get_tag_pose(node)
+    self.pose = None
     self.mass = get_tag(node, 'mass', 0)
     self.inertia = Inertia(tree=get_node(node, 'inertia'))
 
